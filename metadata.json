@@ -1,0 +1,6 @@
+{
+  "name": "Barto YouTube AI",
+  "description": "Suite profesional para administrar canales de YouTube y redes sociales con IA Gemini",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
