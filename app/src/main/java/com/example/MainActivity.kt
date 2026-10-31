@@ -17,6 +17,9 @@ import com.example.util.configureAppCheck
 import com.example.viewmodel.BartoScreen
 import com.example.viewmodel.BartoViewModel
 
+import android.content.Intent
+import android.net.Uri
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: BartoViewModel by viewModels()
@@ -55,6 +58,7 @@ fun BartoApp(viewModel: BartoViewModel) {
     val confirmDialog by viewModel.confirmDialog.collectAsState()
 
     var showChannelSwitcher by remember { mutableStateOf(false) }
+    var showSyncDialogFromMain by remember { mutableStateOf(false) }
 
     val unreadNotifications = notifications.count { !it.isRead }
     val unreadComments = comments.count { !it.isAnswered }
@@ -154,7 +158,18 @@ fun BartoApp(viewModel: BartoViewModel) {
             onSelectChannel = { channelId ->
                 viewModel.switchChannel(channelId)
             },
+            onOpenSync = {
+                showSyncDialogFromMain = true
+            },
             onDismiss = { showChannelSwitcher = false }
+        )
+    }
+
+    // Direct YouTube Live Sync Modal
+    if (showSyncDialogFromMain) {
+        YouTubeSyncDialog(
+            viewModel = viewModel,
+            onDismiss = { showSyncDialogFromMain = false }
         )
     }
 

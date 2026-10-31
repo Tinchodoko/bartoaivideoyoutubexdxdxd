@@ -26,8 +26,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.model.AuditLogEntry
+import com.example.ui.components.YouTubeSyncDialog
 import com.example.ui.theme.*
 import com.example.viewmodel.BartoViewModel
+import com.example.viewmodel.SyncState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +43,10 @@ fun ChannelSettingsScreen(
     val auditLogs by viewModel.auditLogs.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
     val language by viewModel.appLanguage.collectAsState()
+    val syncState by viewModel.syncState.collectAsState()
 
     var showAuditLogModal by remember { mutableStateOf(false) }
+    var showSyncModal by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -265,11 +269,74 @@ fun ChannelSettingsScreen(
                                 Icon(Icons.Default.Security, contentDescription = null, tint = NeonEmerald)
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
-                                    Text("Autenticación Segura Google", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                    Text("Tokens OAuth cifrados en dispositivo", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Autenticación Segura Google OAuth", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text("Cliente: 363588858437-ua3rceqoankcftjqc7a6lubg53oh53dt", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
-                            Text("Activo", fontSize = 11.sp, color = NeonEmerald, fontWeight = FontWeight.Bold)
+                            Text("Conectado", fontSize = 11.sp, color = NeonEmerald, fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = NeonEmerald.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Permisos de YouTube API v3 autorizados:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonEmerald)
+                                Text("• Gestión de videos y publicaciones (youtube.upload)", fontSize = 10.sp)
+                                Text("• Métricas y estadísticas en tiempo real (yt-analytics)", fontSize = 10.sp)
+                                Text("• Comentarios y respuestas del creador (youtube)", fontSize = 10.sp)
+                                Text("• Cuenta vinculada: tinchorotelamail@gmail.com", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                showSyncModal = true
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("sync_youtube_button"),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Sincronizar métricas con YouTube ahora")
+                        }
+
+                        // Live API feedback indicator
+                        when (val state = syncState) {
+                            is SyncState.Loading -> {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = YouTubeRed)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Llamando en vivo a YouTube Data API v3...", fontSize = 11.sp)
+                                }
+                            }
+                            is SyncState.Error -> {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Error API: ${state.message}",
+                                    fontSize = 11.sp,
+                                    color = YouTubeRed,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            is SyncState.Success -> {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "✓ Canal '${state.result.channelName}' (${state.result.channelId}) sincronizado en vivo.",
+                                    fontSize = 11.sp,
+                                    color = NeonEmerald,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            is SyncState.Idle -> {}
                         }
                     }
                 }
@@ -392,5 +459,13 @@ fun ChannelSettingsScreen(
                 }
             }
         }
+    }
+
+    // Real YouTube Live Sync Modal BottomSheet
+    if (showSyncModal) {
+        YouTubeSyncDialog(
+            viewModel = viewModel,
+            onDismiss = { showSyncModal = false }
+        )
     }
 }

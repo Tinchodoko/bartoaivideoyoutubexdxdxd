@@ -21,41 +21,42 @@ fun configureAppCheck(context: Context, intent: Intent?) {
             FirebaseApp.initializeApp(context)
         }
 
-        if (BuildConfig.DEBUG) {
-            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
-            if (!debugToken.isNullOrEmpty()) {
-                val persistenceKey = FirebaseApp.getInstance().persistenceKey
-                val prefs = context.getSharedPreferences(
-                    "$DEBUG_STORE_PREFIX$persistenceKey",
-                    Context.MODE_PRIVATE
-                )
-                prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, debugToken)
-                    .commit()
-                Log.d(TAG, "App Check debug secret configured successfully.")
-            } else {
-                Log.w(TAG, "No debug token found in Intent extra.")
-            }
-
-            FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                DebugAppCheckProviderFactory.getInstance()
-            )
-            Log.d(TAG, "DebugAppCheckProviderFactory installed.")
-        } else {
-            val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
-            if (resId != 0) {
-                val siteKey = context.getString(resId)
-                if (siteKey.isNotBlank()) {
-                    FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                        RecaptchaAppCheckProviderFactory.getInstance(siteKey)
+        // Only configure App Check if FirebaseApp was successfully initialized
+        if (FirebaseApp.getApps(context).isNotEmpty()) {
+            if (BuildConfig.DEBUG) {
+                val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
+                if (!debugToken.isNullOrEmpty()) {
+                    val persistenceKey = FirebaseApp.getInstance().persistenceKey
+                    val prefs = context.getSharedPreferences(
+                        "$DEBUG_STORE_PREFIX$persistenceKey",
+                        Context.MODE_PRIVATE
                     )
-                    Log.d(TAG, "RecaptchaAppCheckProviderFactory installed.")
+                    prefs.edit()
+                        .putString(DEBUG_SECRET_KEY, debugToken)
+                        .commit()
+                    Log.d(TAG, "App Check debug secret configured successfully.")
                 } else {
-                    Log.e(TAG, "recaptcha_site_key resource string is blank.")
+                    Log.w(TAG, "No debug token found in Intent extra.")
                 }
+
+                FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+                    DebugAppCheckProviderFactory.getInstance()
+                )
+                Log.d(TAG, "DebugAppCheckProviderFactory installed.")
             } else {
-                Log.e(TAG, "recaptcha_site_key string resource not found in package.")
+                val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
+                if (resId != 0) {
+                    val siteKey = context.getString(resId)
+                    if (siteKey.isNotBlank()) {
+                        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+                            RecaptchaAppCheckProviderFactory.getInstance(siteKey)
+                        )
+                        Log.d(TAG, "RecaptchaAppCheckProviderFactory installed.")
+                    }
+                }
             }
+        } else {
+            Log.d(TAG, "FirebaseApp is not initialized yet. Skipping App Check initialization.")
         }
     } catch (e: Exception) {
         Log.e(TAG, "Failed to initialize Firebase App Check", e)

@@ -1,10 +1,12 @@
 package com.example.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai.GeminiStudioService
 import com.example.data.BartoRepository
 import com.example.model.*
+import com.example.network.YouTubeNetworkClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -40,10 +42,23 @@ data class ConfirmDialogState(
     val onConfirm: () -> Unit = {}
 )
 
-class BartoViewModel(
-    private val repository: BartoRepository = BartoRepository(),
+sealed class SyncState {
+    object Idle : SyncState()
+    object Loading : SyncState()
+    data class Success(val result: SyncSummaryResult) : SyncState()
+    data class Error(val message: String) : SyncState()
+}
+
+class BartoViewModel @JvmOverloads constructor(
+    application: Application,
+    val networkClient: YouTubeNetworkClient = YouTubeNetworkClient(application),
+    private val repository: BartoRepository = BartoRepository(networkClient),
     private val aiService: GeminiStudioService = GeminiStudioService()
-) : ViewModel() {
+) : AndroidViewModel(application) {
+
+    // YouTube API Live Sync State
+    private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
     // Current Navigation Screen
     private val _currentScreen = MutableStateFlow(BartoScreen.DASHBOARD)
@@ -526,5 +541,58 @@ class BartoViewModel(
                 _isAiLoading.value = false
             }
         }
+    }
+
+    // YouTube Live Sync API Operations
+    fun startNativeAuthorization(
+        activity: android.app.Activity,
+        onResolutionRequired: (android.app.PendingIntent) -> Unit,
+        onSuccess: (String) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        networkClient.authManager.startNativeAuthorization(activity, onResolutionRequired, onSuccess, onFailure)
+    }
+
+    fun handleAuthorizationResult(
+        context: android.content.Context,
+        data: android.content.Intent?,
+        onSuccess: (String) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        networkClient.authManager.handleAuthorizationResult(context, data, onSuccess, onFailure)
+    }
+
+    fun hasValidAccessToken(): Boolean {
+        return networkClient.authManager.hasValidToken()
+    }
+
+    fun syncWithYouTube(manualToken: String? = null) {
+        viewModelScope.launch {
+            _syncState.value = SyncState.Loading
+            try {
+                val result = repository.syncWithYouTubeApi(manualToken)
+                result.fold(
+                    onSuccess = { summary ->
+                        _syncState.value = SyncState.Success(summary)
+                    },
+                    onFailure = { error ->
+                        _syncState.value = SyncState.Error(error.message ?: "Error al sincronizar con YouTube Data API")
+                    }
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _syncState.value = SyncState.Error(e.message ?: "Fallo de comunicación de red con YouTube API")
+            }
+        }
+    }
+
+    fun resetSyncState() {
+        _syncState.value = SyncState.Idle
+    }
+
+    fun disconnectYouTubeAccount() {
+        networkClient.authManager.clearTokens()
+        _syncState.value = SyncState.Idle
     }
 }

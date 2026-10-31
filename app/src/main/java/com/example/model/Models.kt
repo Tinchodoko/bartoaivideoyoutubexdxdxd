@@ -196,3 +196,13 @@ data class AuditLogEntry(
     val details: String,
     val channelName: String
 )
+
+data class SyncSummaryResult(
+    val channelId: String,
+    val channelName: String,
+    val subscribers: Int,
+    val videoCount: Int,
+    val viewCount: Long,
+    val playlistsCount: Int,
+    val commentsCount: Int
+)

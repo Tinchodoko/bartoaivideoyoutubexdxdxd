@@ -9,7 +9,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-class BartoRepository {
+import com.example.network.YouTubeNetworkClient
+
+class BartoRepository(val networkClient: YouTubeNetworkClient? = null) {
 
     // Available Channels
     private val channel1 = Channel(
@@ -406,6 +408,205 @@ class BartoRepository {
                 "Dom" to (baseViews / 7 * 1.30).toLong()
             )
         )
+    }
+
+    suspend fun syncWithYouTubeApi(manualToken: String? = null): Result<SyncSummaryResult> {
+        val client = networkClient ?: return Result.failure(IllegalStateException("Cliente de red no configurado."))
+
+        if (!manualToken.isNullOrBlank()) {
+            client.authManager.saveTokens(manualToken)
+        }
+
+        if (!client.authManager.hasValidToken()) {
+            return Result.failure(
+                IllegalStateException("No hay token de acceso configurado. Conecta tu cuenta con Google OAuth o ingresa un token de autorización.")
+            )
+        }
+
+        return try {
+            // 1. Fetch channel via channels.list with mine=true
+            val channelResponse = client.apiService.getMyChannel(part = "snippet,contentDetails,statistics", mine = true)
+            if (!channelResponse.isSuccessful) {
+                val rawError = channelResponse.errorBody()?.string()
+                val errorMsg = client.parseErrorBody(rawError)
+                val code = channelResponse.code()
+                val userFacingError = when (code) {
+                    401 -> "Error 401 (No autorizado): El token de acceso es inválido o ha expirado. Por favor, autoriza la conexión con Google OAuth."
+                    403 -> "Error 403 (Prohibido): $errorMsg. Verifica que 'YouTube Data API v3' esté habilitada en Google Cloud Console para el proyecto gen-lang-client-0381474779."
+                    404 -> "Error 404 (No encontrado): No se encontró el recurso solicitado en YouTube."
+                    else -> "Error HTTP $code de YouTube API: $errorMsg"
+                }
+                Result.failure(Exception(userFacingError))
+            } else {
+                val channelItems = channelResponse.body()?.items
+                if (channelItems.isNullOrEmpty()) {
+                    Result.failure(
+                        IllegalStateException("La cuenta de Google autenticada no tiene ningún canal de YouTube creado.")
+                    )
+                } else {
+                    val channelItem = channelItems.first()
+                    val channelId = channelItem.id
+                    val title = channelItem.snippet?.title ?: "Canal de YouTube"
+                    val handle = channelItem.snippet?.customUrl ?: "@${title.lowercase().replace(" ", "")}"
+                    val desc = channelItem.snippet?.description ?: ""
+                    val avatar = channelItem.snippet?.thumbnails?.high?.url
+                        ?: channelItem.snippet?.thumbnails?.medium?.url
+                        ?: channelItem.snippet?.thumbnails?.default?.url
+                        ?: ""
+                    val subsCount = channelItem.statistics?.subscriberCount?.toIntOrNull() ?: 0
+                    val videoCount = channelItem.statistics?.videoCount?.toIntOrNull() ?: 0
+                    val viewsCount = channelItem.statistics?.viewCount?.toLongOrNull() ?: 0L
+                    val uploadsPlaylistId = channelItem.contentDetails?.relatedPlaylists?.uploads
+
+                    // Create real synced Channel
+                    val syncedChannel = Channel(
+                        id = channelId,
+                        name = title,
+                        handle = handle,
+                        description = desc,
+                        avatarUrl = avatar,
+                        bannerUrl = avatar,
+                        subscribersCount = subsCount,
+                        totalVideos = videoCount,
+                        totalViews = viewsCount,
+                        isMonetized = true,
+                        watchHoursLastYear = (viewsCount * 0.05).coerceAtLeast(100.0),
+                        connectionStatus = "Conectado en vivo a YouTube Data API v3 ($channelId)"
+                    )
+
+                    _activeChannel.value = syncedChannel
+                    _availableChannels.value = listOf(syncedChannel) + _availableChannels.value.filter { it.id != channelId }
+
+                    // 2. Fetch real videos from uploads playlist
+                    var fetchedVideosCount = 0
+                    if (!uploadsPlaylistId.isNullOrBlank()) {
+                        try {
+                            val playlistItemsResp = client.apiService.getPlaylistItems(playlistId = uploadsPlaylistId, maxResults = 50)
+                            if (playlistItemsResp.isSuccessful) {
+                                val items = playlistItemsResp.body()?.items.orEmpty()
+                                if (items.isNotEmpty()) {
+                                    val realVideos = items.mapNotNull { pItem ->
+                                        val vId = pItem.contentDetails?.videoId ?: pItem.snippet?.resourceId?.videoId ?: return@mapNotNull null
+                                        val vTitle = pItem.snippet?.title ?: "Video de YouTube"
+                                        val vDesc = pItem.snippet?.description ?: ""
+                                        val vPublished = pItem.snippet?.publishedAt ?: "Reciente"
+
+                                        Video(
+                                            id = vId,
+                                            title = vTitle,
+                                            description = vDesc,
+                                            tags = listOf("youtube", "canal real"),
+                                            hashtags = listOf("#YouTube"),
+                                            durationFormatted = "Video",
+                                            durationSeconds = 600,
+                                            views = (viewsCount / (videoCount.coerceAtLeast(1))).coerceAtLeast(0),
+                                            likes = 0,
+                                            dislikes = 0,
+                                            commentsCount = 0,
+                                            sharesCount = 0,
+                                            impressions = 0,
+                                            ctrPercent = 7.5,
+                                            avgViewDurationFormatted = "4:30",
+                                            retentionPercent = 50.0,
+                                            publishDate = vPublished.take(10),
+                                            visibility = VisibilityType.PUBLIC,
+                                            videoType = VideoType.REGULAR,
+                                            category = "General",
+                                            isMonetized = true,
+                                            estimatedRevenueUsd = 0.0
+                                        )
+                                    }
+                                    if (realVideos.isNotEmpty()) {
+                                        _videos.value = realVideos
+                                        fetchedVideosCount = realVideos.size
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("BartoRepository", "Failed to fetch playlist items: ${e.message}")
+                        }
+                    }
+
+                    // 3. Fetch real playlists
+                    var fetchedPlaylistsCount = 0
+                    try {
+                        val playlistsResp = client.apiService.getMyPlaylists(mine = true, maxResults = 25)
+                        if (playlistsResp.isSuccessful) {
+                            val pItems = playlistsResp.body()?.items.orEmpty()
+                            if (pItems.isNotEmpty()) {
+                                val realPlaylists = pItems.map { plItem ->
+                                    Playlist(
+                                        id = plItem.id,
+                                        title = plItem.snippet?.title ?: "Lista de YouTube",
+                                        description = plItem.snippet?.description ?: "",
+                                        visibility = VisibilityType.PUBLIC,
+                                        videoIds = emptyList(),
+                                        updatedAt = plItem.snippet?.publishedAt?.take(10) ?: "Hoy"
+                                    )
+                                }
+                                _playlists.value = realPlaylists
+                                fetchedPlaylistsCount = realPlaylists.size
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("BartoRepository", "Failed to fetch playlists: ${e.message}")
+                    }
+
+                    // 4. Fetch real comments
+                    var fetchedCommentsCount = 0
+                    try {
+                        val commentsResp = client.apiService.getMyCommentThreads(channelId = channelId, maxResults = 50)
+                        if (commentsResp.isSuccessful) {
+                            val cItems = commentsResp.body()?.items.orEmpty()
+                            if (cItems.isNotEmpty()) {
+                                val realComments = cItems.mapNotNull { threadItem ->
+                                    val topComment = threadItem.snippet?.topLevelComment?.snippet ?: return@mapNotNull null
+                                    Comment(
+                                        id = threadItem.id,
+                                        videoId = threadItem.snippet.videoId ?: "",
+                                        videoTitle = "Video del canal",
+                                        authorName = topComment.authorDisplayName ?: "Usuario de YouTube",
+                                        text = topComment.textDisplay ?: "",
+                                        timestamp = topComment.publishedAt?.take(10) ?: "Reciente",
+                                        likesCount = topComment.likeCount ?: 0,
+                                        hasCreatorHeart = false,
+                                        isAnswered = (threadItem.snippet.totalReplyCount ?: 0) > 0,
+                                        isFlaggedForReview = false,
+                                        isSpamOrOffensive = false,
+                                        isImportantQuestion = topComment.textDisplay?.contains("?") == true
+                                    )
+                                }
+                                if (realComments.isNotEmpty()) {
+                                    _comments.value = realComments
+                                    fetchedCommentsCount = realComments.size
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("BartoRepository", "Failed to fetch comments: ${e.message}")
+                    }
+
+                    logAudit(
+                        "Sincronización real YouTube",
+                        "Canal real '$title' ($channelId) sincronizado con $subsCount subs, $videoCount videos."
+                    )
+
+                    Result.success(
+                        SyncSummaryResult(
+                            channelId = channelId,
+                            channelName = title,
+                            subscribers = subsCount,
+                            videoCount = videoCount,
+                            viewCount = viewsCount,
+                            playlistsCount = fetchedPlaylistsCount,
+                            commentsCount = fetchedCommentsCount
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     private fun logAudit(action: String, details: String) {

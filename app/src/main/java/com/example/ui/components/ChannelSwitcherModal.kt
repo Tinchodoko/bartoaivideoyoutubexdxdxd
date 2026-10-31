@@ -39,6 +39,7 @@ fun ChannelSwitcherModal(
     availableChannels: List<Channel>,
     connectedPlatforms: List<Pair<PlatformType, Boolean>>,
     onSelectChannel: (String) -> Unit,
+    onOpenSync: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -162,7 +163,10 @@ fun ChannelSwitcherModal(
 
             // Add new channel button
             OutlinedButton(
-                onClick = { /* Connect Google Account action */ },
+                onClick = {
+                    onDismiss()
+                    onOpenSync()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("connect_channel_button"),
@@ -170,7 +174,7 @@ fun ChannelSwitcherModal(
             ) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Vincular otro canal de YouTube (OAuth)")
+                Text("Vincular / Sincronizar con Google OAuth")
             }
 
             Spacer(modifier = Modifier.height(20.dp))
